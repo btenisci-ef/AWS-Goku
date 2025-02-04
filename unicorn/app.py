@@ -1,42 +1,62 @@
+from uuid import UUID
+
+import boto3
 import json
-
-# import requests
-
+import os
+import uuid
+from datetime import datetime
+from botocore.exceptions import ClientError
 
 def lambda_handler(event, context):
-    """Sample pure Lambda function
+    #Lambda handler for birth of a unicorn.
+    
+    
+    # Initialise DDB client
+    DDB_TABLE = os.environ.get("DYNAMODB_TABLE")
+    if DDB_TABLE is None:
+        raise ClientError("DYNAMODB_TABLE environment variable is undefined")
+    dynamodb = boto3.resource("dynamodb")
+    table = dynamodb.Table(DDB_TABLE)
+    
+    
+    # Create new Unicorn TAG
+    unicorn_tag: UUID = str(uuid.uuid4())
+    
+    # Get today's date for birthday
+    unicorn_birthday = datetime.now().strftime("%c")
 
-    Parameters
-    ----------
-    event: dict, required
-        API Gateway Lambda Proxy Input Format
 
-        Event doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-input-format
+    # Get unicorn details from event
+    event_body = json.loads(event["body"])
 
-    context: object, required
-        Lambda Context runtime methods and attributes
+    unicorn = {
 
-        Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
-
-    Returns
-    ------
-    API Gateway Lambda Proxy Output Format: dict
-
-        Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
-    """
-
-    # try:
-    #     ip = requests.get("http://checkip.amazonaws.com/")
-    # except requests.RequestException as e:
-    #     # Send some context about this error to Lambda Logs
-    #     print(e)
-
-    #     raise e
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps({
-            "message": "hello world",
-            # "location": ip.text.replace("\n", "")
-        }),
+        "id": unicorn_tag,
+        "name": event_body["Name"],
+        "weight": event_body["Weight"],
+        "birthday": unicorn_birthday,
     }
+
+    # create entry in ddb for newborn unicorn:
+    response = register_unicorn(table,unicorn)
+
+    if response["ResponseMetadata"]["HTTPStatusCode"] == 200:
+
+        # return generated unicorn tag and name back to user:
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "message": "A new unicorn is born!!!",
+                }
+            ),
+        }
+
+
+def register_unicorn(table,unicorn):
+    return table.put_item(Item=unicorn,)
+    
+    # return {
+    #     'statusCode': 200,
+    #     'body': json.dumps('Hooray! We have a new unicorn!')
+    # }
