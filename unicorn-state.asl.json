@@ -1,0 +1,54 @@
+{
+    "Comment": "Unicorn state machine to handle unicorn birth registration",
+    "StartAt": "GenerateUnicornTag",
+    "States": {
+      "GenerateUnicornTag": {
+        "Type": "Pass",
+        "Parameters": {
+          "id.$": "States.UUID()"
+        },
+        "ResultPath": "$.unicorn.id",
+        "Next": "GetCurrentTimestamp"
+      },
+      "GetCurrentTimestamp": {
+        "Type": "Pass",
+        "Parameters": {
+          "birthday.$": "States.Format('YYYY-MM-DD HH:mm:ss', States.Timestamp())"
+        },
+        "ResultPath": "$.unicorn.birthday",
+        "Next": "ExtractUnicornDetails"
+      },
+      "ExtractUnicornDetails": {
+        "Type": "Pass",
+        "Parameters": {
+          "name.$": "$.Name",
+          "weight.$": "$.Weight"
+        },
+        "ResultPath": "$.unicorn",
+        "Next": "RegisterUnicorn"
+      },
+      "RegisterUnicorn": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::dynamodb:putItem",
+        "Parameters": {
+          "TableName": "${UnicornTable}",
+          "Item": {
+            "id": { "S.$": "$.unicorn.id" },
+            "name": { "S.$": "$.unicorn.name" },
+            "weight": { "N.$": "$.unicorn.weight" },
+            "birthday": { "S.$": "$.unicorn.birthday" }
+          }
+        },
+        "ResultPath": "$.ddbResponse",
+        "Next": "SuccessResponse"
+      },
+      "SuccessResponse": {
+        "Type": "Pass",
+        "Result": {
+          "message": "A new unicorn is born!!!"
+        },
+        "End": true
+      }
+    }
+  }
+  

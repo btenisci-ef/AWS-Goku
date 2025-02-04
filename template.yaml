@@ -3,31 +3,99 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   unicorn7
 
-  Sample SAM Template for unicorn7
+  Sample SAM Template for unicorn7 using Step Functions
 
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
     Timeout: 3
-
-    # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
     LoggingConfig:
       LogFormat: JSON
+
 Resources:
-  UnicornBirthFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  UnicornStateMachine:
+    Type: AWS::Serverless::StateMachine
     Properties:
-      CodeUri: unicorn/
-      Handler: app.lambda_handler
-      Runtime: python3.11
-      Architectures:
-      - x86_64
-      Events:
-        HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
-          Properties:
-            Path: /
-            Method: get
+      DefinitionUri: unicorn-state.asl.json
+      DefinitionSubstitutions:
+        UnicornTable: !Ref UnicornTable
+      Role: !GetAtt UnicornStateMachineExecutionRole.Arn
+
+  UnicornStateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [states.amazonaws.com]
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionsDynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                Resource: !GetAtt UnicornTable.Arn
+  UnicornApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: UnicornApi
+      StageName: Prod
+
+  UnicornApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UnicornApi
+      ResourceId: !GetAtt UnicornApi.RootResourceId
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: 
+          !Sub arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
+        Credentials: !GetAtt UnicornApiExecutionRole.Arn
+        RequestTemplates:
+          application/json: 
+            !Sub |
+              {
+                "stateMachineArn": "${UnicornStateMachine}",
+                "input": "$util.escapeJavaScript($input.json('$'))"
+              }
+        PassthroughBehavior: WHEN_NO_MATCH
+        IntegrationResponses:
+          - StatusCode: 200
+
+      MethodResponses:
+        - StatusCode: 200
+
+  UnicornApiExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartStepFunctionsExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref UnicornStateMachine
   UnicornTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -43,13 +111,6 @@ Resources:
         WriteCapacityUnits: 5
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  UnicornBirthFunctionApi:
-    Description: API Gateway endpoint URL for Prod stage for Hello World function
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/unicorn/"
-  UnicornBirthFunction:
-    Description: Hello World Lambda Function ARN
-    Value: !GetAtt UnicornBirthFunction.Arn
-
+  UnicornStateMachineArn:
+    Description: Step Functions State Machine ARN
+    Value: !Ref UnicornStateMachine
