@@ -8,9 +8,8 @@ Description: >
   integration to achieve the same functionality.
 
 Resources:
-
   #
-  # 1) DynamoDB Table
+  # 1) DynamoDB Table (same as before)
   #
   UnicornTable:
     Type: AWS::DynamoDB::Table
@@ -28,6 +27,7 @@ Resources:
 
   #
   # 2) IAM Role for API Gateway to assume when calling DynamoDB
+  #    (Restricts to PutItem on our 'unicorn' table)
   #
   UnicornApiIntegrationRole:
     Type: AWS::IAM::Role
@@ -62,42 +62,39 @@ Resources:
           title: "Unicorn API"
           version: "1.0"
         paths:
-          /unicorn:
+          /:
             post:
               x-amazon-apigateway-integration:
+                # Direct AWS integration
                 type: aws
                 httpMethod: POST
-                uri: !Sub "arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem"
+                uri:
+                  Fn::Sub: "arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem"
                 credentials: !GetAtt UnicornApiIntegrationRole.Arn
-
-                # 1) Force API Gateway to send the request as application/x-amz-json-1.0
-                requestParameters:
-                  integration.request.header.Content-Type: "'application/x-amz-json-1.0'"
-
-                # 2) Transform request body + $context values into a DynamoDB PutItem call
+                # Map our incoming JSON + request ID into a DynamoDB PutItem
                 requestTemplates:
                   application/json: |
+                    #set($birthday = $input.path('$.Birthday'))
+                    #if($birthday == "")
+                      #set($birthday = "$context.requestTime")
+                    #end
                     {
                       "TableName": "unicorn",
                       "Item": {
-                        "id": {
-                          "S": "$context.requestId"
-                        },
-                        "Name": {
-                          "S": "$input.path('$.Name')"
-                        },
-                        "Weight": {
-                          "S": "$input.path('$.Weight')"
-                        }
+                        "id": { "S": "$context.requestId" },
+                        "name": { "S": "$input.path('$.Name')" },
+                        "weight": { "N": "$input.path('$.Weight')" },
+                        "birthday": { "S": "$birthday" }
                       }
                     }
-
-                # 3) Map the DynamoDB result to a 200 status code
                 responses:
                   default:
                     statusCode: "200"
 
 Outputs:
+  #
+  # 4) Output the new API's invoke URL
+  #
   UnicornApiInvokeURL:
     Description: "API Gateway endpoint URL for POST requests"
-    Value: !Sub "https://${UnicornApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/unicorn"
+    Value: !Sub "https://${UnicornApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
