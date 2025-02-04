@@ -4,7 +4,7 @@
 
 import requests, time
 
-url = 'https://pljqwunbh6.execute-api.eu-west-1.amazonaws.com/Prod/'
+url = 'https://0qvcl8cdd0.execute-api.eu-west-1.amazonaws.com/Prod/'
 
 obj1 = '{"Name": "Horsiana","Weight": 50}'
 obj2 = '{"Name": "Bucefalos","Weight": 65}'

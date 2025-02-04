@@ -1,101 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  unicorn7
+  unicorn7 (No-Lambda version)
 
-  Sample SAM Template for unicorn7 using Step Functions
-
-Globals:
-  Function:
-    Timeout: 3
-    LoggingConfig:
-      LogFormat: JSON
+  Demonstrates removing all compute (Lambda)
+  and using direct API Gateway -> DynamoDB
+  integration to achieve the same functionality.
 
 Resources:
-  UnicornStateMachine:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      DefinitionUri: unicorn-state.asl.json
-      DefinitionSubstitutions:
-        UnicornTable: !Ref UnicornTable
-      Role: !GetAtt UnicornStateMachineExecutionRole.Arn
-
-  UnicornStateMachineExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: [states.amazonaws.com]
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: StepFunctionsDynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                  - dynamodb:GetItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Scan
-                  - dynamodb:Query
-                Resource: !GetAtt UnicornTable.Arn
-  UnicornApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: UnicornApi
-      StageName: Prod
-
-  UnicornApiMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref UnicornApi
-      ResourceId: !GetAtt UnicornApi.RootResourceId
-      HttpMethod: POST
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS
-        IntegrationHttpMethod: POST
-        Uri: 
-          !Sub arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
-        Credentials: !GetAtt UnicornApiExecutionRole.Arn
-        RequestTemplates:
-          application/json: 
-            !Sub |
-              {
-                "stateMachineArn": "${UnicornStateMachine}",
-                "input": "$util.escapeJavaScript($input.json('$'))"
-              }
-        PassthroughBehavior: WHEN_NO_MATCH
-        IntegrationResponses:
-          - StatusCode: 200
-
-      MethodResponses:
-        - StatusCode: 200
-
-  UnicornApiExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: apigateway.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: StartStepFunctionsExecution
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - states:StartExecution
-                Resource: !Ref UnicornStateMachine
+  #
+  # 1) DynamoDB Table (same as before)
+  #
   UnicornTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -110,7 +25,72 @@ Resources:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
 
+  #
+  # 2) IAM Role for API Gateway to assume when calling DynamoDB
+  #    (Restricts to PutItem on our 'unicorn' table)
+  #
+  UnicornApiIntegrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowPutItemOnUnicornTable
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt UnicornTable.Arn
+
+  #
+  # 3) Serverless API with direct DynamoDB integration
+  #
+  UnicornApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: "Unicorn API"
+          version: "1.0"
+        paths:
+          /:
+            post:
+              x-amazon-apigateway-integration:
+                # Direct AWS integration
+                type: aws
+                httpMethod: POST
+                uri:
+                  Fn::Sub: "arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem"
+                credentials: !GetAtt UnicornApiIntegrationRole.Arn
+                # Map our incoming JSON + request ID into a DynamoDB PutItem
+                requestTemplates:
+                  application/json: |
+                    {
+                      "TableName": "unicorn",
+                      "Item": {
+                        "id": { "S": "$context.requestId" },
+                        "name": { "S": "$input.path('$.Name')" },
+                        "weight": { "N": "$input.path('$.Weight')" },
+                        "birthday": { "S": "$context.requestTime" }
+                      }
+                    }
+                responses:
+                  default:
+                    statusCode: "200"
+
 Outputs:
-  UnicornStateMachineArn:
-    Description: Step Functions State Machine ARN
-    Value: !Ref UnicornStateMachine
+  #
+  # 4) Output the new API's invoke URL
+  #
+  UnicornApiInvokeURL:
+    Description: "API Gateway endpoint URL for POST requests"
+    Value: !Sub "https://${UnicornApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
